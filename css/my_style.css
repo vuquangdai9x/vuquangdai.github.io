@@ -1,0 +1,15 @@
+body{
+	font-family: Arial;
+}
+a,a:hover,a:visited{
+	text-decoration: none;
+	transition: color 0.5s;
+}
+
+a:visited{
+	color: blue;
+}
+
+a:hover{
+	color: red;
+}
