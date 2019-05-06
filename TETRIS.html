@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Tetris</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<style type="text/css">
+		#GameOverMess{
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100vw;
+			height: 100vh;
+			background-color: rgba(0,0,0,0.7);
+			text-align: center;
+			padding-top: 30vh;
+			font-size: 3em;
+			line-height: 2em;
+			color: white;
+			box-sizing: border-box;
+		}
+		#canvas{
+			image-rendering: -moz-crisp-edges;
+			image-rendering: -webkit-crisp-edges;
+			image-rendering: pixelated;
+			image-rendering: crisp-edges;
+			display: none;
+		}
+		#Menu{
+			width: 100%;
+			padding-top: 30vh;
+			text-align: center;
+		}
+		#Menu>label{
+			display: block;
+		}
+		#Menu>button{
+			font-family: Arial;
+			font-size: 3em;
+			border: 3px solid black;
+			background-color: white;
+			padding: 0.5em 1em;
+			transition: all 0.3s;
+		}
+		#Menu>button:hover{
+			cursor: pointer;
+			box-shadow: 0 0 10px red;
+			transition: all 0.3s;
+		}
+		#Info{
+			display: none;
+		}
+	</style>
+</head>
+<body>
+	<div id="Menu">
+		<!-- <h1>Nhập kích cỡ</h1>
+		<label>
+			<span>Số cột: </span>
+			<input type="number" id="InputCol">
+		</label>
+		<label>
+			<span>Số hàng: </span>
+			<input type="number" id="InputRow">
+		</label> -->
+		<button onclick="startGame()">Start!</button>
+		
+	</div>
+
+	<canvas id="canvas"></canvas>
+	<div id="Info">
+		<span>FPS</span>
+		<span id="fps-value"></span>
+		<span style="width: 100px; display: inline-block;"> </span>
+		<span>Score</span>
+		<span id="score-value" style="font-weight: bold;">0</span>
+	</div>
+
+	<script type="text/javascript">
+		"use strict";
+		var config={
+			speed: 50, 
+			scoreToFaster: 50,
+			fasterValue: 1,
+			canvas: {
+				width: 150,
+				height: 250,
+				border: '1px solid black',
+				scale: 2
+			},
+			map: {
+				col: 15,
+				row: 25
+			},
+			brick: [ 	//mảng lưu thông số các loại gạch
+				//quy ước 0,0 là vị trí thấp nhất
+				// tạo độ y phải nhỏ hơn 0
+				[[0,0],[-1,0],[0,-1],[-1,-1]], 		//square
+				[[0,0],[0,-1],[0,-2],[0,-3]], 		//stick
+				[[0,0],[1,0],[2,0],[0,-1]], 		// L shape
+				[[0,0],[-1,0],[-2,0],[0,-1]],		// L shape flip
+				[[0,0],[-1,0],[1,0],[0,-1]], 		// _|_
+				[[0,0],[1,0],[1,-1],[2,-1]], 		// Z
+				[[0,0],[-1,0],[-1,-1],[-2,-1]], 	// Z flip
+				[[0,0],[-1,0]], 						// 2 cục gạch
+				[[0,0]], 							// 1 cục gạch
+				[[0,0],[-1,-1]],						// cầu thang 2 bậc	
+				[[0,0],[-1,-1],[-2,-2]],				// cầu thang 3 bậc	
+				[[0,0],[0,-1],[-1,-1],[1,-1],[0,-2]]	// dấu +
+				//[[0,0],[-2,0],[-4,0],[2,0],[4,0]] 		.....
+			],
+			//mảng lưu trục quay của hình. Trục là số thứ tự của 1 phần tử con trong mảng brick
+			//-1 là không có trục quay. Ví dụ: khối vuông
+			rotateAnchor: [-1,1,1,1,0,1,1,0,0,0,1,1,-1] 
+		};
+
+		var cellW = Math.floor(config.canvas.width/config.map.col),
+			cellH = Math.floor(config.canvas.height/config.map.row),
+			speed = Math.floor(1000/config.speed);
+
+		var animationHandle;
+		var Score=0;
+		var fpsShow = document.getElementById('fps-value'),
+			scoreShow = document.getElementById('score-value');
+		var canvas = document.getElementById('canvas');
+		var ctx = canvas.getContext('2d');
+		canvas.width 	= cellW*config.map.col;
+		canvas.height 	= cellH*config.map.row;
+		canvas.style.border = config.canvas.border;
+		canvas.style.width = canvas.width*config.canvas.scale+'px';
+		canvas.style.height = canvas.height*config.canvas.scale+'px';
+
+		class Cell {
+			constructor(x,y) {
+				this.x=x;
+				this.y=y;
+			}
+
+			draw(){	//draw on canvas
+				
+				ctx.fillRect(this.x*cellW,this.y*cellH,cellW,cellH);
+			}
+
+			clear(){
+				ctx.clearRect(this.x*cellW,this.y*cellH,cellW,cellH);
+			}
+
+			moveTo(x,y){
+				this.x=x;
+				this.y=y;
+			}
+		}
+
+		class Brick {
+			constructor(xStart,yStart,rotate=0){
+				this.xStart=xStart;
+				this.yStart=yStart;
+				this.type;
+				this.arrayCell = new Array();
+			}
+
+			setNewType(type){
+				this.arrayCell=[];
+				this.type=type;
+				let _self = this;
+				let brickSetting = config.brick[_self.type];
+				for(var i = 0, length1 = brickSetting.length; i < length1; i++){
+					let x=brickSetting[i][0];
+					let y=brickSetting[i][1];
+					let offset=Math.floor(config.map.col/2);
+					_self.arrayCell.push(new Cell(x+offset,y-1));
+				}
+			}
+
+			clearBrick(){
+				let arrCell = this.arrayCell;
+				for(var i = 0, length1 = arrCell.length; i < length1; i++){
+					arrCell[i].clear();
+				}
+			}
+
+			drawBrick(){
+				coloring('black');
+				let arrCell = this.arrayCell;
+				for(var i = 0, length1 = arrCell.length; i < length1; i++){
+					arrCell[i].draw();
+				}
+			}
+
+			fall(){
+				this.clearBrick();
+				let arrCell = this.arrayCell;
+				for(var i = 0, length1 = arrCell.length; i < length1; i++){
+					let cell = arrCell[i];
+					cell.moveTo(cell.x,cell.y+1);
+				}
+				this.drawBrick();
+			}
+
+			move(dir,mapMatrix){
+				let tmp;
+				let isMovable = true;
+				let arrCell = this.arrayCell;
+
+				if (dir=='left') {
+					tmp = -1;
+					for(var i = 0, length = arrCell.length; i < length; i++){
+						let cell = arrCell[i];
+						if (cell.y>=0) {
+							if ((cell.x-1<0)||(mapMatrix[cell.y][cell.x-1]==1)) isMovable = false;
+						}
+					}
+				}
+				if (dir=='right') {
+					tmp = 1;
+					for(var i = 0, length = arrCell.length; i < length; i++){
+						let cell = arrCell[i];
+						if (cell.y>=0) {
+							if ((cell.x+1>=mapMatrix[0].length)||(mapMatrix[cell.y][cell.x+1]==1)) isMovable = false;
+						}
+					}
+				}
+
+				if (isMovable) {
+					this.clearBrick();
+					for(var i = 0, length = arrCell.length; i < length; i++){
+						let cell = arrCell[i];
+						cell.moveTo(cell.x+tmp,cell.y);
+					}
+					this.drawBrick();
+				}
+
+			}
+
+			rotate(dir,mapMatrix){
+				let _self = this;
+				let anchorConfig = config.rotateAnchor[_self.type];
+				if (anchorConfig==undefined) anchorConfig=0;
+				let arrCell = _self.arrayCell;
+				let newArrCell = new Array(arrCell.length);
+				let isMovable = true;
+				if (anchorConfig!=-1) {
+					let anchor = this.arrayCell[anchorConfig];
+					if (dir=='left') {
+						for(var i = 0, length1 = arrCell.length; i < length1; i++){
+							let cell = arrCell[i];
+							let dx = cell.x-anchor.x;
+							let dy = cell.y-anchor.y;
+							let newX = anchor.x-dy;
+							let newY = anchor.y+dx;
+							newArrCell[i]={x:newX,y:newY};
+							if ((newY<0)||(newY>=config.map.row)||(newX<0)||(newX>=config.map.col)||(mapMatrix[newY][newX]==1)) {
+								isMovable=false;
+								break;
+							}
+						}
+						if (isMovable) {
+							this.clearBrick();
+							for(var i = 0, length = arrCell.length; i < length; i++){
+								arrCell[i].x=newArrCell[i].x;
+								arrCell[i].y=newArrCell[i].y;
+							}
+							this.drawBrick();
+						}
+					}
+				}
+			}
+		}
+
+		class Map {
+			constructor(row,col){
+				this.matrix = new Array(row);
+				let matrixMap = this.matrix;
+				for(let i = 0; i < row; i++){
+					matrixMap[i] = new Array(col);
+					for(let j = 0; j < col; j++){
+						matrixMap[i][j]=0;
+					}
+				}
+			}
+
+			reDraw(){
+				coloring('random');
+				let matrixMap = this.matrix;
+				ctx.clearRect(0,0,canvas.width,canvas.height);
+				for(var i = 0, length1 = matrixMap.length; i < length1; i++){
+					for(var j = 0, length2 = matrixMap[i].length; j < length2; j++){
+						if (matrixMap[i][j]==1) {
+							ctx.fillRect(j*cellW,i*cellH,cellW,cellH);
+						}
+					}
+				}
+			}
+
+			brickToRock(brickObj){
+				let _self=this;
+				for(var i = 0, length = brickObj.arrayCell.length; i < length; i++){
+					let cell = brickObj.arrayCell[i];
+					if (cell.y>=0) {
+						_self.matrix[cell.y][cell.x]=1;
+					}
+				}
+				this.checkFullRow();
+			}
+
+			isOverHeight(){
+				let matrixMap = this.matrix;
+				let checkFullHeight=false;
+				for(var i = 0, length1 = matrixMap[0].length; i < length1; i++){
+					if (matrixMap[0][i]==1) {
+						checkFullHeight=true;
+						break;
+					}
+				}
+				return checkFullHeight;
+			}
+
+			checkFullRow(){
+				let _self = this;
+				for(var i = 0, length1 = _self.matrix.length; i < length1; i++){
+					let isFull = true;
+					for(var j = 0, length2 = _self.matrix[i].length; j < length2; j++){
+						if (_self.matrix[i][j]==0) {
+							isFull = false;
+							break;
+						}
+					}
+					if (isFull) {
+						for(var j = i-1; j > 0; j--){
+							_self.matrix[j+1] = _self.matrix[j];
+						}
+						increasingScore();
+					}
+				}
+				this.reDraw();
+			}
+		}
+
+		var brick1 = new Brick(10,0,0);
+		var map1 = new Map(config.map.row,config.map.col);
+		brick1.setNewType(Math.floor(Math.random()*config.brick.length));
+
+		var keypressed=0;
+		var countFrame=0;
+		var _startTime=0;
+		
+		
+		function FrameLoop(time){
+			if (countFrame%speed==0||keypressed==3) {
+				// check collision and move
+				let isCollision = false;
+				let maxRow = config.map.row-1;
+				for(var i = 0, length = brick1.arrayCell.length; i < length; i++){
+					let cell = brick1.arrayCell[i];
+					if (cell.y+1>=0){
+						if ((cell.y==maxRow) || (map1.matrix[cell.y+1][cell.x]==1)) isCollision=true;
+					} 
+				}
+				if (isCollision) {
+					map1.brickToRock(brick1);
+					brick1.setNewType(Math.floor(Math.random()*config.brick.length));
+					//brick1.setNewType(2);
+
+				}else{
+					brick1.fall(map1.matrix);
+				}
+					
+				//check over height
+				if (map1.isOverHeight()) gameOver();
+			}
+
+
+			let check = true;
+			switch (keypressed) {
+				case 1: 	//arrow up
+					brick1.rotate('left',map1.matrix);
+					break;
+				case 2: 	//left arrow
+					brick1.move('left',map1.matrix);
+					break;
+				case 3: 	//arrow down
+					break;
+				case 4: 	//arrow right
+					brick1.move('right',map1.matrix);
+					break;
+				case -1: 	//P
+					gameOver();
+					break;
+				default:
+					// statements_def
+					break;
+			}
+			keypressed=0;
+				
+			if (countFrame==1000) countFrame==0;
+			countFrame++;
+
+			fpsShow.innerHTML = (Math.floor(1000/(time - _startTime)*10)/10).toFixed(0);
+			_startTime = time;
+			animationHandle = window.requestAnimationFrame(FrameLoop);
+		}
+
+		function gameOver(){
+			cancelAnimationFrame(animationHandle);
+			var messGameOver=document.createElement('div');
+			messGameOver.setAttribute("id","GameOverMess");
+			document.getElementsByTagName('body')[0].appendChild(messGameOver);
+			messGameOver.innerHTML="Game Over<br>Score : <b>"+Score+"</b><br>"
+									+"<button onclick='location = location;' style='border:0; background: white; padding: 0.5em 1em;'>Replay</button>";
+		}
+
+		function startGame(){
+			document.getElementById('Info').style.display = 'block';
+			document.getElementById('Menu').style.display = 'none';
+			canvas.style.display = 'block';
+			animationHandle = window.requestAnimationFrame(FrameLoop);
+		}
+
+		// Sự kiện khi gõ phím
+		function KeypressHandle(event){
+			switch (event.charCode) {
+				case 119: 	//w
+				case 87: 	//W
+				case 38: 	//arrow up
+					keypressed = 1;
+					break;
+				case 97: 	//a
+				case 65: 	//A
+				case 37: 	//left arrow
+					keypressed = 2;
+					break;
+				case 115: 	//s
+				case 83: 	//S
+				case 40: 	//arrow down
+					keypressed = 3;
+					break;
+				case 100: 	//d
+				case 68: 	//D
+				case 39: 	//arrow right
+					keypressed = 4;
+					break;
+				case 32: 	//space   dừng
+					break;	
+				case 112: 	//p
+				case 80: 	//P
+					keypressed = -1;
+					break;
+				default:
+					keypressed = 0;
+					break;
+			}			
+		}
+
+		window.addEventListener('keypress', function(e){
+			KeypressHandle(e);
+		});
+
+		function coloring(value='random'){
+			if (value=='random') {
+				ctx.fillStyle='rgb('+Math.floor(Math.random()*256)+','+Math.floor(Math.random()*256)+','+Math.floor(Math.random()*256)+')';
+			}else{
+				ctx.fillStyle=value;
+			}	
+		}
+
+		function increasingScore(){
+			Score+=10;
+			scoreShow.innerHTML=Score;
+			if (Score%config.scoreToFaster==0) {
+				speed+=config.fasterValue;
+			}
+		}
+		
+	</script>
+</body>
+</html>
